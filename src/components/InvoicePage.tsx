@@ -1,4 +1,4 @@
-import { FC, useState, useEffect } from 'react'
+import { FC, useState, useEffect, useMemo } from 'react'
 import { Invoice, ProductLine } from '../data/types'
 import { initialInvoice, initialProductLine } from '../data/initialData'
 import EditableInput from './EditableInput'
@@ -33,9 +33,9 @@ interface Props {
 }
 
 const InvoicePage: FC<Props> = ({ data, pdfMode, onChange }) => {
-  const [invoice, setInvoice] = useState<Invoice>(data ? { ...data } : { ...initialInvoice })
-  const [subTotal, setSubTotal] = useState<number>()
-  const [saleTax, setSaleTax] = useState<number>()
+  const [invoiceState, setInvoice] = useState<Invoice>(data ? { ...data } : { ...initialInvoice })
+  // In PDF mode, always render from the latest props so the exported PDF reflects current edits
+  const invoice = pdfMode && data ? data : invoiceState
 
   const dateFormat = 'MMM dd, yyyy'
   const invoiceDate = invoice.invoiceDate !== '' ? new Date(invoice.invoiceDate) : new Date()
@@ -111,26 +111,21 @@ const InvoicePage: FC<Props> = ({ data, pdfMode, onChange }) => {
     return amount.toFixed(2)
   }
 
-  useEffect(() => {
-    let subTotal = 0
+  // Computed during render (not in effects) so the PDF renderer gets correct totals on its first pass
+  const subTotal = useMemo(
+    () =>
+      invoice.productLines.reduce((sum, productLine) => {
+        const quantityNumber = parseFloat(productLine.quantity)
+        const rateNumber = parseFloat(productLine.rate)
+        return sum + (quantityNumber && rateNumber ? quantityNumber * rateNumber : 0)
+      }, 0),
+    [invoice.productLines],
+  )
 
-    invoice.productLines.forEach((productLine) => {
-      const quantityNumber = parseFloat(productLine.quantity)
-      const rateNumber = parseFloat(productLine.rate)
-      const amount = quantityNumber && rateNumber ? quantityNumber * rateNumber : 0
-
-      subTotal += amount
-    })
-
-    setSubTotal(subTotal)
-  }, [invoice.productLines])
-
-  useEffect(() => {
+  const saleTax = useMemo(() => {
     const match = invoice.taxLabel.match(/(\d+)%/)
     const taxRate = match ? parseFloat(match[1]) : 0
-    const saleTax = subTotal ? (subTotal * taxRate) / 100 : 0
-
-    setSaleTax(saleTax)
+    return subTotal ? (subTotal * taxRate) / 100 : 0
   }, [subTotal, invoice.taxLabel])
 
   useEffect(() => {
